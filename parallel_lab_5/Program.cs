@@ -169,7 +169,7 @@ namespace parallel_lab_5
 
         private static int[] GetInitialArray()
         {
-            List<int> res;
+            int[] res;
             StreamReader f = null;
             try
             {
@@ -177,14 +177,14 @@ namespace parallel_lab_5
 
                 var s = f.ReadToEnd().Split(new[] {' '}, StringSplitOptions.RemoveEmptyEntries);
 
-                res = s.Select(item => Convert.ToInt32(item)).ToList();
+                res = s.Select(item => Convert.ToInt32(item)).ToArray();
             }
             finally
             {
                 f?.Close();
             }
 
-            return res.ToArray();
+            return res;
         }
 
         private static void Sequential()
@@ -307,10 +307,18 @@ namespace parallel_lab_5
                 }
 
                 var threads = new Thread[Procs];
+                var step = arr.Length / Procs;
+
                 for (var i = 0; i < Procs; i++)
                 {
+                    var l = i * step;
+                    var r = i == Procs - 1 ? arr.Length - 1 : (i + 1) * step - 1;
+
+                    var ints = new int[r - l + 1];
+                    Array.Copy(arr, l, ints, 0, r - l + 1);
+
                     threads[i] = new Thread(_parQuickSort);
-                    threads[i].Start(new Params(arr, i));
+                    threads[i].Start(new Params(ints, i));
                 }
 
 
@@ -371,17 +379,13 @@ namespace parallel_lab_5
             var number = ((Params) o).Number;
             var ints = ((Params) o).Ints;
 
-            int step = ints.Length / Procs,
-                l = number * step,
-                r = number == Procs - 1 ? ints.Length - 1 : (number + 1) * step - 1;
-
-            if (_bSortAsc) _seqQuickSortAsc(ints, l, r);
-            else _seqQuickSortDesc(ints, l, r);
+            if (_bSortAsc) _seqQuickSortAsc(ints, 0, ints.Length - 1);
+            else _seqQuickSortDesc(ints, 0, ints.Length - 1);
 
             var samples = new List<int>();
             for (var i = 0; i < Procs; i++)
             {
-                samples.Add(ints[ints.Length*i/(Procs*Procs) + l]);
+                samples.Add(ints[ints.Length*i/(Procs*Procs)]);
             }
             lock ("samples")
             {
@@ -421,23 +425,23 @@ namespace parallel_lab_5
             }
 
             var syncLists = new List<int>[Procs];
-            var j = l;
+            var j = 0;
             for (var i = 0; i < Procs - 1; i++)
             {
                 syncLists[i] = new List<int>();
                 if (_bSortAsc)
-                    while (j < r + 1 && ints[j] <= Samples[i])
+                    while (j < ints.Length && ints[j] <= Samples[i])
                         syncLists[i].Add(ints[j++]);
                 else
-                    while (j < r + 1 && ints[j] >= Samples[i])
+                    while (j < ints.Length && ints[j] >= Samples[i])
                         syncLists[i].Add(ints[j++]);
             }
             syncLists[Procs - 1] = new List<int>();
             if (_bSortAsc)
-                while (j < r + 1 && ints[j] > Samples[Procs - 2])
+                while (j < ints.Length && ints[j] > Samples[Procs - 2])
                     syncLists[Procs - 1].Add(ints[j++]);
             else
-                while (j < r + 1 && ints[j] < Samples[Procs - 2])
+                while (j < ints.Length && ints[j] < Samples[Procs - 2])
                     syncLists[Procs - 1].Add(ints[j++]);
 
             for (var i = 0; i < Procs; i++)
@@ -453,10 +457,9 @@ namespace parallel_lab_5
                 SyncStage[number].Set();
                 WaitHandle.WaitAll(SyncStage);
             }
-
-            lock (BagsForExchange)
-                if(_bSortAsc) _seqQuickSortAsc(BagsForExchange[number], 0, BagsForExchange[number].Count - 1);
-                else _seqQuickSortDesc(BagsForExchange[number], 0, BagsForExchange[number].Count - 1);
+//lock (BagsForExchange)
+            if(_bSortAsc) _seqQuickSortAsc(BagsForExchange[number], 0, BagsForExchange[number].Count - 1);
+            else _seqQuickSortDesc(BagsForExchange[number], 0, BagsForExchange[number].Count - 1);
         }
 
 	    private static void Help()
