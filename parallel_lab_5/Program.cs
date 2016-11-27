@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Threading;
 
 namespace parallel_lab_5
 {
@@ -49,6 +50,11 @@ namespace parallel_lab_5
         /// Whether to sort in ascendig order.
         /// </summary>
         private static bool _bSortAsc = true;
+
+        /// <summary>
+        /// Threads count. Usually Environment.ProcessorCount.
+        /// </summary>
+        private static readonly int Procs = Environment.ProcessorCount;
 
         public static void Main(string[] args)
         {
@@ -219,7 +225,7 @@ namespace parallel_lab_5
             }
         }
 
-        private static void _seqQuickSortAsc(int[] ints, int l, int r)
+        private static void _seqQuickSortAsc(IList<int> ints, int l, int r)
         {
             if (l == r) return;
             int min = int.MaxValue, max = int.MinValue;
@@ -251,7 +257,7 @@ namespace parallel_lab_5
             if (lNew < r) _seqQuickSortAsc(ints, lNew, r);
         }
 
-        private static void _seqQuickSortDesc(int[] ints, int l, int r)
+        private static void _seqQuickSortDesc(IList<int> ints, int l, int r)
         {
             if (l == r) return;
             int min = int.MaxValue, max = int.MinValue;
@@ -290,19 +296,41 @@ namespace parallel_lab_5
             {
                 var arr = GetInitialArray();
 
-                Stopwatch timer = new Stopwatch();
+                var timer = new Stopwatch();
 
                 timer.Start();
 
+                for (var i = 0; i < Procs; i++)
+                {
+                    BagsForExchange[i] = new List<int>();
+                    SyncStage[i] = new ManualResetEvent(false);
+                }
+
+                var threads = new Thread[Procs];
+                for (var i = 0; i < Procs; i++)
+                {
+                    threads[i] = new Thread(_parQuickSort);
+                    threads[i].Start(new Params(arr, i));
+                }
+
+
+                foreach (var thread in threads)
+                {
+                    thread.Join();
+                }
                 timer.Stop();
 
                 f = new StreamWriter(File.Open(Environment.CurrentDirectory + "\\out.txt", FileMode.Create));
-                foreach (var i in arr)
+                foreach (var list in BagsForExchange)
                 {
-                    f.Write(i + " ");
+                    foreach (var i in list)
+                    {
+                        f.Write(i + " ");
+                    }
                 }
                 f.Close();
                 Console.WriteLine("New out.txt created.");
+
 
                 f = new StreamWriter(File.Open(Environment.CurrentDirectory + "\\summary.txt", FileMode.Create));
                 f.WriteLine("Режим: многопоточное выполнение.");
@@ -320,17 +348,127 @@ namespace parallel_lab_5
             }
 	    }
 
-        private static void _parQuickSort(int[] ints, int l, int r)
+        private struct Params
         {
+            public readonly int[] Ints;
+            public readonly int Number;
 
+            public Params(int[] ints, int i)
+            {
+                Ints = ints;
+                Number = i;
+            }
+        }
+
+        private static readonly List<int>[] BagsForExchange = new List<int>[Procs];
+        private static readonly List<int> Samples = new List<int>();
+
+        private static readonly ManualResetEvent SamplesSorted = new ManualResetEvent(false);
+        private static readonly ManualResetEvent[] SyncStage = new ManualResetEvent[Procs];
+
+        private static void _parQuickSort(object o)
+        {
+            var number = ((Params) o).Number;
+            var ints = ((Params) o).Ints;
+
+            int step = ints.Length / Procs,
+                l = number * step,
+                r = number == Procs - 1 ? ints.Length - 1 : (number + 1) * step - 1;
+
+            if (_bSortAsc) _seqQuickSortAsc(ints, l, r);
+            else _seqQuickSortDesc(ints, l, r);
+
+            var samples = new List<int>();
+            for (var i = 0; i < Procs; i++)
+            {
+                samples.Add(ints[ints.Length*i/(Procs*Procs) + l]);
+            }
+            lock ("samples")
+            {
+                foreach (var sample in samples)
+                {
+                    Samples.Add(sample);
+                }
+            }
+
+            if (number == 0)
+            {
+                SyncStage[number].Set();
+                WaitHandle.WaitAll(SyncStage);
+                SyncStage[number].Reset();
+
+                if (_bSortAsc) _seqQuickSortAsc(Samples, 0, Samples.Count - 1);
+                else _seqQuickSortDesc(Samples, 0, Samples.Count - 1);
+
+                samples.Clear();
+                for (var i = 1; i < Procs; i++)
+                {
+                    samples.Add(Samples[i*(Samples.Count/Procs)]);
+                }
+                Samples.Clear();
+                foreach (var sample in samples)
+                {
+                    Samples.Add(sample);
+                }
+
+                SamplesSorted.Set();
+            }
+            else
+            {
+                SyncStage[number].Set();
+                SamplesSorted.WaitOne();
+                SyncStage[number].Reset();
+            }
+
+            var syncLists = new List<int>[Procs];
+            var j = l;
+            for (var i = 0; i < Procs - 1; i++)
+            {
+                syncLists[i] = new List<int>();
+                if (_bSortAsc)
+                    while (j < r + 1 && ints[j] <= Samples[i])
+                        syncLists[i].Add(ints[j++]);
+                else
+                    while (j < r + 1 && ints[j] >= Samples[i])
+                        syncLists[i].Add(ints[j++]);
+            }
+            syncLists[Procs - 1] = new List<int>();
+            if (_bSortAsc)
+                while (j < r + 1 && ints[j] > Samples[Procs - 2])
+                    syncLists[Procs - 1].Add(ints[j++]);
+            else
+                while (j < r + 1 && ints[j] < Samples[Procs - 2])
+                    syncLists[Procs - 1].Add(ints[j++]);
+
+            for (var i = 0; i < Procs; i++)
+            {
+                SyncStage[number].Reset();
+                lock (BagsForExchange[i])
+                {
+                    foreach (var item in syncLists[i])
+                    {
+                        BagsForExchange[i].Add(item);
+                    }
+                }
+                SyncStage[number].Set();
+                WaitHandle.WaitAll(SyncStage);
+            }
+
+            lock (BagsForExchange)
+                if(_bSortAsc) _seqQuickSortAsc(BagsForExchange[number], 0, BagsForExchange[number].Count - 1);
+                else _seqQuickSortDesc(BagsForExchange[number], 0, BagsForExchange[number].Count - 1);
         }
 
 	    private static void Help()
 		{
 			Console.WriteLine("This program enables you to sort arrays via parallel and non-parallel quick-sort " +
-							  "algorithms.\n\t-s Non-parallel sorting\n\t-p Parallel sorting\n\t-h This message\n" +
-							  "Data is taken from in.txt so make sure it exists. When complete, out.txt and summary" +
-							  ".txt are generated.");
+							  "algorithms.\n\t-s Non-parallel sorting\n\t-p Parallel sorting\n\t-h This message" +
+			                  "\n\t--asc Sort in ascending order\n\t--desc Sort in descending order" +
+			                  "\n\t--n-rnd [n] Create new array of n elements. Not sorted. If used with -s or -p, will" +
+			                  " create new array before starting sorting." +
+			                  "\n\t--n-asc [n], --n-desc [n] Same as the --n-rnd, but arrays are sorted." +
+							  "\nData is taken from in.txt so make sure it exists. When complete, out.txt and summary" +
+							  ".txt are generated. Previous data is overwritten.");
 		}
 
 		#endregion main commands
