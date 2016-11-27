@@ -11,8 +11,6 @@ namespace parallel_lab_5
     [SuppressMessage("ReSharper", "TailRecursiveCall")]
     internal class Program
     {
-        // --n-rnd, --n-asc, --n-desc, -s, -p, -h, -asc, -desc
-
         /// <summary>
         /// List of commands to be applied before the others.
         /// </summary>
@@ -33,8 +31,10 @@ namespace parallel_lab_5
         {
             {"-s", Sequential},
             {"-p", Parallel},
+            {"-n", Net},
             {"-h", Help}
         };
+
 
         /// <summary>
         /// Flag used to prevent multiple new array creations.
@@ -74,7 +74,7 @@ namespace parallel_lab_5
             else Commands["-h"]();
         }
 
-        #region	urgent commands
+    #region	urgent commands
 
         private static void NewArray(int sortType, int count)
         {
@@ -163,9 +163,9 @@ namespace parallel_lab_5
             _bSortAsc = false;
         }
 
-        #endregion urgent commands
+    #endregion urgent commands
 
-        #region main commands
+    #region main commands
 
         private static int[] GetInitialArray()
         {
@@ -185,6 +185,18 @@ namespace parallel_lab_5
             }
 
             return res;
+        }
+
+        private static void Net()
+        {
+            var arr = GetInitialArray();
+
+            var timer = new Stopwatch();
+            timer.Start();
+            Array.Sort(arr);
+            timer.Stop();
+
+            Console.WriteLine(timer.ElapsedMilliseconds);
         }
 
         private static void Sequential()
@@ -304,6 +316,11 @@ namespace parallel_lab_5
                 {
                     BagsForExchange[i] = new List<int>();
                     SyncStage[i] = new ManualResetEvent(false);
+                    SyncStage2[i] = new ManualResetEvent[Procs];
+                    for (var j = 0; j < Procs; j++)
+                    {
+                        SyncStage2[i][j] = new ManualResetEvent(false);
+                    }
                 }
 
                 var threads = new Thread[Procs];
@@ -321,7 +338,6 @@ namespace parallel_lab_5
                     threads[i].Start(new Params(ints, i));
                 }
 
-
                 foreach (var thread in threads)
                 {
                     thread.Join();
@@ -338,7 +354,6 @@ namespace parallel_lab_5
                 }
                 f.Close();
                 Console.WriteLine("New out.txt created.");
-
 
                 f = new StreamWriter(File.Open(Environment.CurrentDirectory + "\\summary.txt", FileMode.Create));
                 f.WriteLine("Режим: многопоточное выполнение.");
@@ -368,11 +383,36 @@ namespace parallel_lab_5
             }
         }
 
+        private static void _isSorted()
+        {
+            IEnumerable<int> a = BagsForExchange[0];
+            a = a.Concat(BagsForExchange[1]);
+            a = a.Concat(BagsForExchange[2]);
+            a = a.Concat(BagsForExchange[3]);
+
+            var c = a.ToArray();
+            var b = true;
+            var prev = c[0];
+
+            for (int i = 1; i < c.Length; i++)
+            {
+                if (prev > c[i])
+                {
+                    b = false;
+                    break;
+                }
+                prev = c[i];
+            }
+
+            Console.WriteLine(!b ? "SHIT THIS IS NOT SORTED" : "OL RIHGT!");
+        }
+
         private static readonly List<int>[] BagsForExchange = new List<int>[Procs];
         private static readonly List<int> Samples = new List<int>();
 
         private static readonly ManualResetEvent SamplesSorted = new ManualResetEvent(false);
         private static readonly ManualResetEvent[] SyncStage = new ManualResetEvent[Procs];
+        private static readonly ManualResetEvent[][] SyncStage2 = new ManualResetEvent[Procs][];
 
         private static void _parQuickSort(object o)
         {
@@ -399,7 +439,6 @@ namespace parallel_lab_5
             {
                 SyncStage[number].Set();
                 WaitHandle.WaitAll(SyncStage);
-                SyncStage[number].Reset();
 
                 if (_bSortAsc) _seqQuickSortAsc(Samples, 0, Samples.Count - 1);
                 else _seqQuickSortDesc(Samples, 0, Samples.Count - 1);
@@ -421,7 +460,6 @@ namespace parallel_lab_5
             {
                 SyncStage[number].Set();
                 SamplesSorted.WaitOne();
-                SyncStage[number].Reset();
             }
 
             var syncLists = new List<int>[Procs];
@@ -446,7 +484,6 @@ namespace parallel_lab_5
 
             for (var i = 0; i < Procs; i++)
             {
-                SyncStage[number].Reset();
                 lock (BagsForExchange[i])
                 {
                     foreach (var item in syncLists[i])
@@ -454,13 +491,14 @@ namespace parallel_lab_5
                         BagsForExchange[i].Add(item);
                     }
                 }
-                SyncStage[number].Set();
-                WaitHandle.WaitAll(SyncStage);
+                SyncStage2[i][number].Set();
+                WaitHandle.WaitAll(SyncStage2[i]);
             }
-//lock (BagsForExchange)
-            if(_bSortAsc) _seqQuickSortAsc(BagsForExchange[number], 0, BagsForExchange[number].Count - 1);
-            else _seqQuickSortDesc(BagsForExchange[number], 0, BagsForExchange[number].Count - 1);
+
+            if (_bSortAsc) BagsForExchange[number].Sort();
+            else BagsForExchange[number].Sort((a, b) => b.CompareTo(a));
         }
+
 
 	    private static void Help()
 		{
@@ -474,6 +512,6 @@ namespace parallel_lab_5
 							  ".txt are generated. Previous data is overwritten.");
 		}
 
-		#endregion main commands
+	#endregion main commands
 	}
 }
