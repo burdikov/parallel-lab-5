@@ -193,7 +193,6 @@ namespace parallel_lab_5
 
             var timer = new Stopwatch();
             timer.Start();
-
             Array.Sort(arr);
             if (_bSortAsc) Array.Reverse(arr);
 
@@ -411,7 +410,7 @@ namespace parallel_lab_5
         }
 
         private static readonly List<int>[] BagsForExchange = new List<int>[Procs];
-        private static int[] _samples = new int[Procs*Procs];
+        private static readonly List<int> Samples = new List<int>();
 
         private static readonly ManualResetEvent SamplesSorted = new ManualResetEvent(false);
         private static readonly ManualResetEvent[] SyncStage = new ManualResetEvent[Procs];
@@ -425,9 +424,18 @@ namespace parallel_lab_5
             Array.Sort(ints);
             if (!_bSortAsc) Array.Reverse(ints);
 
+            var samples = new List<int>();
             for (var i = 0; i < Procs; i++)
             {
-                _samples[i * Procs + i] = ints[ints.Length * i / (Procs * Procs)];
+                samples.Add(ints[ints.Length * i / (Procs * Procs)]);
+            }
+
+            lock ("samples")
+            {
+                foreach (var sample in samples)
+                {
+                    Samples.Add(sample);
+                }
             }
 
             if (number == 0)
@@ -437,13 +445,19 @@ namespace parallel_lab_5
 
                 Array.Sort(_samples);
                 if (!_bSortAsc) Array.Reverse(_samples);
+                Samples.Sort();
+                if (!_bSortAsc) Samples.Reverse();
 
-                var samples = new int[Procs - 1];
-                for (var i = 0; i < Procs - 1; i++)
+                samples.Clear();
+                for (var i = 1; i < Procs; i++)
                 {
-                    samples[i] = _samples[i * (_samples.Length / Procs)];
+                    samples.Add(Samples[i*(Samples.Count/Procs)]);
                 }
-                _samples = samples;
+                Samples.Clear();
+                foreach (var sample in samples)
+                {
+                    Samples.Add(sample);
+                }
 
                 SamplesSorted.Set();
             }
@@ -459,18 +473,18 @@ namespace parallel_lab_5
             {
                 syncLists[i] = new List<int>();
                 if (_bSortAsc)
-                    while (j < ints.Length && ints[j] <= _samples[i])
+                    while (j < ints.Length && ints[j] <= Samples[i])
                         syncLists[i].Add(ints[j++]);
                 else
-                    while (j < ints.Length && ints[j] >= _samples[i])
+                    while (j < ints.Length && ints[j] >= Samples[i])
                         syncLists[i].Add(ints[j++]);
             }
             syncLists[Procs - 1] = new List<int>();
             if (_bSortAsc)
-                while (j < ints.Length && ints[j] > _samples[Procs - 2])
+                while (j < ints.Length && ints[j] > Samples[Procs - 2])
                     syncLists[Procs - 1].Add(ints[j++]);
             else
-                while (j < ints.Length && ints[j] < _samples[Procs - 2])
+                while (j < ints.Length && ints[j] < Samples[Procs - 2])
                     syncLists[Procs - 1].Add(ints[j++]);
 
             for (var i = 0; i < Procs; i++)
