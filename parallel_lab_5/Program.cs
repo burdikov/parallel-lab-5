@@ -443,8 +443,6 @@ namespace parallel_lab_5
                 SyncStage[number].Set();
                 WaitHandle.WaitAll(SyncStage);
 
-                Array.Sort(_samples);
-                if (!_bSortAsc) Array.Reverse(_samples);
                 Samples.Sort();
                 if (!_bSortAsc) Samples.Reverse();
 
