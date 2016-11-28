@@ -193,7 +193,10 @@ namespace parallel_lab_5
 
             var timer = new Stopwatch();
             timer.Start();
+
             Array.Sort(arr);
+            if (_bSortAsc) Array.Reverse(arr);
+
             timer.Stop();
 
             Console.WriteLine(timer.ElapsedMilliseconds);
@@ -408,7 +411,7 @@ namespace parallel_lab_5
         }
 
         private static readonly List<int>[] BagsForExchange = new List<int>[Procs];
-        private static readonly List<int> Samples = new List<int>();
+        private static int[] _samples = new int[Procs*Procs];
 
         private static readonly ManualResetEvent SamplesSorted = new ManualResetEvent(false);
         private static readonly ManualResetEvent[] SyncStage = new ManualResetEvent[Procs];
@@ -419,20 +422,12 @@ namespace parallel_lab_5
             var number = ((Params) o).Number;
             var ints = ((Params) o).Ints;
 
-            if (_bSortAsc) _seqQuickSortAsc(ints, 0, ints.Length - 1);
-            else _seqQuickSortDesc(ints, 0, ints.Length - 1);
+            Array.Sort(ints);
+            if (!_bSortAsc) Array.Reverse(ints);
 
-            var samples = new List<int>();
             for (var i = 0; i < Procs; i++)
             {
-                samples.Add(ints[ints.Length*i/(Procs*Procs)]);
-            }
-            lock ("samples")
-            {
-                foreach (var sample in samples)
-                {
-                    Samples.Add(sample);
-                }
+                _samples[i * Procs + i] = ints[ints.Length * i / (Procs * Procs)];
             }
 
             if (number == 0)
@@ -440,19 +435,15 @@ namespace parallel_lab_5
                 SyncStage[number].Set();
                 WaitHandle.WaitAll(SyncStage);
 
-                if (_bSortAsc) _seqQuickSortAsc(Samples, 0, Samples.Count - 1);
-                else _seqQuickSortDesc(Samples, 0, Samples.Count - 1);
+                Array.Sort(_samples);
+                if (!_bSortAsc) Array.Reverse(_samples);
 
-                samples.Clear();
-                for (var i = 1; i < Procs; i++)
+                var samples = new int[Procs - 1];
+                for (var i = 0; i < Procs - 1; i++)
                 {
-                    samples.Add(Samples[i*(Samples.Count/Procs)]);
+                    samples[i] = _samples[i * (_samples.Length / Procs)];
                 }
-                Samples.Clear();
-                foreach (var sample in samples)
-                {
-                    Samples.Add(sample);
-                }
+                _samples = samples;
 
                 SamplesSorted.Set();
             }
@@ -468,18 +459,18 @@ namespace parallel_lab_5
             {
                 syncLists[i] = new List<int>();
                 if (_bSortAsc)
-                    while (j < ints.Length && ints[j] <= Samples[i])
+                    while (j < ints.Length && ints[j] <= _samples[i])
                         syncLists[i].Add(ints[j++]);
                 else
-                    while (j < ints.Length && ints[j] >= Samples[i])
+                    while (j < ints.Length && ints[j] >= _samples[i])
                         syncLists[i].Add(ints[j++]);
             }
             syncLists[Procs - 1] = new List<int>();
             if (_bSortAsc)
-                while (j < ints.Length && ints[j] > Samples[Procs - 2])
+                while (j < ints.Length && ints[j] > _samples[Procs - 2])
                     syncLists[Procs - 1].Add(ints[j++]);
             else
-                while (j < ints.Length && ints[j] < Samples[Procs - 2])
+                while (j < ints.Length && ints[j] < _samples[Procs - 2])
                     syncLists[Procs - 1].Add(ints[j++]);
 
             for (var i = 0; i < Procs; i++)
@@ -495,8 +486,8 @@ namespace parallel_lab_5
                 WaitHandle.WaitAll(SyncStage2[i]);
             }
 
-            if (_bSortAsc) BagsForExchange[number].Sort();
-            else BagsForExchange[number].Sort((a, b) => b.CompareTo(a));
+            BagsForExchange[number].Sort();
+            if (!_bSortAsc) BagsForExchange[number].Reverse();
         }
 
 
