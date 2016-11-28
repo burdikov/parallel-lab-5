@@ -425,8 +425,9 @@ namespace parallel_lab_5
             var samples = new List<int>();
             for (var i = 0; i < Procs; i++)
             {
-                samples.Add(ints[ints.Length*i/(Procs*Procs)]);
+                samples.Add(ints[ints.Length * i / (Procs * Procs)]);
             }
+
             lock ("samples")
             {
                 foreach (var sample in samples)
@@ -440,8 +441,8 @@ namespace parallel_lab_5
                 SyncStage[number].Set();
                 WaitHandle.WaitAll(SyncStage);
 
-                if (_bSortAsc) _seqQuickSortAsc(Samples, 0, Samples.Count - 1);
-                else _seqQuickSortDesc(Samples, 0, Samples.Count - 1);
+                Samples.Sort();
+                if (!_bSortAsc) Samples.Reverse();
 
                 samples.Clear();
                 for (var i = 1; i < Procs; i++)
